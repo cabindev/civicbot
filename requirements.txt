@@ -1,0 +1,5 @@
+botbuilder-core==4.16.2
+botbuilder-integration-aiohttp==4.16.2
+botbuilder-schema==4.16.2
+google-genai==1.21.1
+python-dotenv==1.0.1
