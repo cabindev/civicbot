@@ -21,6 +21,7 @@ class GeminiClient:
         self._client = genai.Client(api_key=Config.GEMINI_API_KEY)
         self._config = types.GenerateContentConfig(
             system_instruction=Config.SYSTEM_PROMPT,
+            temperature=Config.TEMPERATURE,
         )
 
     async def generate_reply(self, history: List[Dict[str, str]]) -> str:
@@ -48,4 +49,4 @@ class GeminiClient:
         except Exception:  # noqa: BLE001 - surface a friendly message instead
             logger.exception("Gemini request failed")
 
-        return "ขออภัยค่ะ ระบบขัดข้องชั่วคราว กรุณาลองใหม่อีกครั้งนะคะ"
+        return "ขออภัยครับ ระบบขัดข้องชั่วคราว กรุณาลองใหม่อีกครั้งนะครับ"

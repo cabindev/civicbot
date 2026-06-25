@@ -28,7 +28,7 @@ async def on_error(context: TurnContext, error: Exception):
     logger.error("Unhandled error: %s", error, exc_info=error)
     traceback.print_exc()
     await context.send_activity(
-        "ขออภัยค่ะ เกิดข้อผิดพลาดในระบบ กรุณาลองใหม่อีกครั้งนะคะ"
+        "ขออภัยครับ เกิดข้อผิดพลาดในระบบ กรุณาลองใหม่อีกครั้งนะครับ"
     )
 
 
