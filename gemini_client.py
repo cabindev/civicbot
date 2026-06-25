@@ -15,14 +15,23 @@ class GeminiClient:
     """Generates replies from Gemini using a CivicSpace system prompt."""
 
     def __init__(self):
-        if not Config.GEMINI_API_KEY:
-            raise ValueError("GEMINI_API_KEY is not set")
-
-        self._client = genai.Client(api_key=Config.GEMINI_API_KEY)
+        # Lazy: don't create the client (or require the key) at construction
+        # time, so a missing GEMINI_API_KEY never crashes the whole app on
+        # startup — the health endpoint stays up and errors are debuggable.
+        self._client = None
         self._config = types.GenerateContentConfig(
             system_instruction=Config.SYSTEM_PROMPT,
             temperature=Config.TEMPERATURE,
         )
+
+    def _ensure_client(self):
+        """Create the genai client on first use; None if no API key."""
+        if self._client is None:
+            if not Config.GEMINI_API_KEY:
+                logger.error("GEMINI_API_KEY is not set — cannot call Gemini")
+                return None
+            self._client = genai.Client(api_key=Config.GEMINI_API_KEY)
+        return self._client
 
     async def generate_reply(self, history: List[Dict[str, str]]) -> str:
         """Generate a reply given conversation history.
@@ -30,6 +39,13 @@ class GeminiClient:
         ``history`` is a list of ``{"role": "user"|"model", "text": str}``
         entries, oldest first, with the latest user message last.
         """
+        client = self._ensure_client()
+        if client is None:
+            return (
+                "ขออภัยครับ ระบบยังไม่พร้อมใช้งาน (ไม่พบการตั้งค่า GEMINI_API_KEY) "
+                "กรุณาแจ้งทีมงานครับ"
+            )
+
         contents = [
             types.Content(role=turn["role"], parts=[types.Part(text=turn["text"])])
             for turn in history
@@ -37,7 +53,7 @@ class GeminiClient:
 
         try:
             # google-genai exposes a native async client under `.aio`.
-            response = await self._client.aio.models.generate_content(
+            response = await client.aio.models.generate_content(
                 model=Config.GEMINI_MODEL,
                 contents=contents,
                 config=self._config,

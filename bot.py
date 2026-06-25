@@ -1,12 +1,12 @@
 """CivicSpace bot: bridges Bot Framework activities to Gemini."""
 
 import logging
-from typing import Dict, List
+from typing import List
 
 from botbuilder.core import ActivityHandler, TurnContext
 from botbuilder.schema import ChannelAccount
 
-from config import Config
+from conversation_store import ConversationStore, InMemoryConversationStore
 from gemini_client import GeminiClient
 
 logger = logging.getLogger(__name__)
@@ -15,12 +15,11 @@ logger = logging.getLogger(__name__)
 class CivicSpaceBot(ActivityHandler):
     """Replies to user messages using Gemini, keeping per-conversation history."""
 
-    def __init__(self, gemini: GeminiClient):
+    def __init__(self, gemini: GeminiClient, store: ConversationStore = None):
         self._gemini = gemini
-        # Maps conversation id -> list of {"role", "text"} turns.
-        # NOTE: in-memory store; for multi-instance deployments back this with
-        # Bot Framework state storage (e.g. Cosmos DB / Blob) instead.
-        self._histories: Dict[str, List[Dict[str, str]]] = {}
+        # Swap in a persistent ConversationStore here for multi-instance/durable
+        # history; defaults to in-process memory.
+        self._store = store or InMemoryConversationStore()
 
     async def on_members_added_activity(
         self, members_added: List[ChannelAccount], turn_context: TurnContext
@@ -28,9 +27,9 @@ class CivicSpaceBot(ActivityHandler):
         for member in members_added:
             if member.id != turn_context.activity.recipient.id:
                 await turn_context.send_activity(
-                    "สวัสดีครับ ผมคือ CivicSpace Assistant 🙌 "
+                    "สวัสดีครับ ผมคือ CivicSpace Assistant"
                     "ถามได้เลยครับ ทั้งเรื่อง CivicSpace ประเด็นแอลกอฮอล์/ปัจจัยเสี่ยง "
-                    "งานพื้นที่ หรือให้ช่วยงานทีมก็ได้ครับ"
+                    "งานพื้นที่ หรือประเด็นอื่นๆที่ท่านสนใจ ผมจะพยายามช่วยตอบให้ครับ"
                 )
 
     async def on_message_activity(self, turn_context: TurnContext):
@@ -40,18 +39,10 @@ class CivicSpaceBot(ActivityHandler):
         if not user_text:
             return
 
-        history = self._histories.setdefault(conversation_id, [])
-        history.append({"role": "user", "text": user_text})
+        await self._store.add_turn(conversation_id, "user", user_text)
+        history = await self._store.get_history(conversation_id)
 
         reply = await self._gemini.generate_reply(history)
 
-        history.append({"role": "model", "text": reply})
-        self._trim_history(conversation_id)
-
+        await self._store.add_turn(conversation_id, "model", reply)
         await turn_context.send_activity(reply)
-
-    def _trim_history(self, conversation_id: str):
-        """Keep only the last HISTORY_LIMIT turns for context."""
-        history = self._histories[conversation_id]
-        if len(history) > Config.HISTORY_LIMIT:
-            self._histories[conversation_id] = history[-Config.HISTORY_LIMIT :]
