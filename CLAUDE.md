@@ -336,19 +336,56 @@ Meta app อยู่ใน **Development mode** (Messenger checklist ข้อ 
 
 ### วิธีไล่ปัญหาเมื่อบอทเงียบ
 
+**อ่าน log เป็นอย่างแรก** มันแยกได้ทันทีว่าพังฝั่งไหน
+
 ```bash
-# 1. app ยังมีชีวิตไหม
-curl -s https://civic-bot-app.azurewebsites.net/
-
-# 2. channel ยังอยู่ไหม
-az bot show -g civicspace_group -n civic-bot --query "properties.configuredChannels"
-
-# 3. ข้อความวิ่งถึง app ไหม (ทักใน Messenger แล้วดู log สด)
-az webapp log tail -g civicspace_group -n civic-bot-app
+# ดาวน์โหลด log (ดูย้อนหลังได้ ดีกว่า log tail เวลาไล่เหตุที่เกิดไปแล้ว)
+az webapp log download -g civicspace_group -n civic-bot-app --log-file logs.zip
+unzip -o -q logs.zip -d logs
+grep -h "BF-Facebook" logs/LogFiles/*docker.log | tail -20
 ```
 
-อ่านผลข้อ 3 แบบนี้ — เห็น request + บอทตอบ = ปกติ / เห็น request + error = ปัญหาที่โค้ดหรือ Gemini /
-ไม่เห็น request เลย = Facebook ส่งไม่ถึง ให้ไปดู webhook กับ App Review
+แถวที่ขึ้นต้นด้วย `BF-Facebook` คือข้อความที่ Facebook ส่งเข้ามา อ่าน HTTP code ท้ายบรรทัด
+
+| ผลที่เห็น | แปลว่า | แก้ที่ไหน |
+|---|---|---|
+| `HTTP 201` | ปกติ บอทตอบสำเร็จ | — |
+| `HTTP 500` + `(ServiceError) Facebook API error` | **ขาเข้าดี ขาออกพัง** — credential ที่ Azure ใช้ส่งข้อความกลับใช้ไม่ได้ | Azure Bot → Channels → Facebook |
+| `HTTP 401` | JWT ไม่ผ่าน | `MICROSOFT_APP_PASSWORD` หมดอายุ/ไม่ตรง |
+| ไม่มีแถว `BF-Facebook` เลย | Facebook ไม่ได้ส่งมา | webhook ฝั่ง Meta / App Review |
+
+### เคสจริง 2026-08-18 — บอทเงียบสนิทเพราะ Facebook credential
+
+บอททำงานปกติตอน 12:32–13:49 แล้วเงียบสนิทตั้งแต่ 14:25 ผู้ใช้ไม่เห็นแม้แต่ข้อความ error
+
+log ชี้ชัด: `POST /api/messages` จาก `BF-Facebook` ได้ **HTTP 500** พร้อม
+`ErrorResponseException: (ServiceError) Facebook API error` เกิดซ้ำ 15 ครั้ง
+
+**ทำไมผู้ใช้ไม่เห็นอะไรเลย** — `on_error` ใน `app.py` พยายามส่งข้อความ "ขออภัย ระบบขัดข้อง"
+กลับไป แต่การส่งนั้นก็ใช้ช่องทางเดียวกันที่พังอยู่ จึง fail ซ้ำ ผู้ใช้เลยเจอความเงียบ
+ไม่ใช่ข้อความ error
+
+**สาเหตุ** — Page Access Token / App Secret ที่ Facebook channel เก็บไว้ใช้ไม่ได้แล้ว
+เกิดได้ 2 ทาง
+
+1. **Page Access Token หมดอายุ** — token จาก Graph Explorer เป็น short-lived (~1 ชม.)
+   ถ้าไม่ Extend ก่อน บอทจะทำงานได้ไม่กี่ชั่วโมงแล้วเงียบ
+2. **reset App Secret แล้วไม่ได้อัปเดตใน Azure** — Azure ยังถือตัวเก่า เรียก Facebook API ไม่ผ่าน
+
+**วิธีแก้** — Azure Bot → Channels → Facebook แล้วใส่ **ทั้ง App Secret และ Page Access Token
+ตัวล่าสุดใหม่ทั้งคู่** (อย่าใส่ทีละตัว จะไล่ไม่จบว่าตัวไหนพัง) แล้ว Apply
+
+> ⚠️ **Extend token ทุกครั้งก่อนเอามาใช้** ที่ developers.facebook.com/tools/accesstoken/
+> กด **Extend Access Token** ให้เป็น long-lived ไม่งั้นจะกลับมาเงียบอีกในไม่กี่ชั่วโมง
+
+**ยืนยันว่าหายแล้ว** — เทียบ etag ของ channel ว่าเปลี่ยนไหม แล้วให้คนทักมาหนึ่งข้อความ
+จากนั้นโหลด log ดูว่ากลับเป็น `HTTP 201`
+
+```bash
+az bot facebook show -g civicspace_group -n civic-bot --query "etag" -o tsv
+```
+
+
 
 ---
 
