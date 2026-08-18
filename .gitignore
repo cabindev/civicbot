@@ -14,3 +14,9 @@ venv/
 .DS_Store
 .vscode/
 .idea/
+
+# Azure log dumps (โหลดใหม่ได้ด้วย az webapp log download)
+webapp_logs/
+webapp_logs*.zip
+botlogs*/
+botlogs*.zip
