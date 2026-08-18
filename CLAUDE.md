@@ -72,8 +72,8 @@ Facebook Page  ──(webhook: messages, messaging_postbacks)──►  Azure Bo
 
 **Web App Name:** `civic-bot-app`  
 **Resource Group:** `civicspace_group`  
-**URL:** `https://civic-bot-app-ftfkffgja6ahgne8.southeastasia-01.azurewebsites.net`  
-**Messaging Endpoint:** `https://civic-bot-app-ftfkffgja6ahgne8.southeastasia-01.azurewebsites.net/api/messages`
+**URL:** `https://civic-bot-app.azurewebsites.net`  
+**Messaging Endpoint:** `https://civic-bot-app.azurewebsites.net/api/messages`
 
 ### Startup Command (CRITICAL)
 ```bash
@@ -149,7 +149,7 @@ gh secret set AZURE_WEBAPP_PUBLISH_PROFILE \
 | Facebook Page ID | 728353493701593 |
 | Facebook App ID | 1007274552043694 |
 | Verify Token | เก็บใน Azure Bot Facebook Channel settings |
-| Webhook URL | `https://civic-bot-app-ftfkffgja6ahgne8.southeastasia-01.azurewebsites.net/api/messages` |
+| Webhook URL | `https://civic-bot-app.azurewebsites.net/api/messages` |
 | Subscribed Fields | messages, messaging_postbacks |
 
 ---
@@ -186,7 +186,7 @@ gh secret set AZURE_WEBAPP_PUBLISH_PROFILE \
 
 ```bash
 # ตรวจว่า app up
-curl -s https://civic-bot-app-ftfkffgja6ahgne8.southeastasia-01.azurewebsites.net/
+curl -s https://civic-bot-app.azurewebsites.net/
 # ผล: {"status": "ok", "service": "civicspace-bot"}
 
 # ดู logs realtime
@@ -211,6 +211,98 @@ git push origin main
 # GitHub Actions จะ deploy ให้อัตโนมัติ
 ```
 
+## Rebuild (2026-08-18) — กู้คืนหลัง Azure resources ถูกลบ
+
+App Service `civic-bot-app` เดิม และ Azure Bot resource ถูกลบไป (App Service Plan เดิม
+ถูกนำไปรัน Django app `civicspace` แทน) สร้างใหม่แล้วดังนี้
+
+**สิ่งที่รอดมา ไม่ต้องสร้างใหม่:** App Registration `civic-bot` (`1bd2c7e9-…`, SingleTenant)
+พร้อม client secret (หมดอายุ 2026-12-21 และ 2028-06-24) → `MICROSOFT_APP_ID` / `MICROSOFT_APP_PASSWORD` เดิมยังใช้ได้
+
+**สิ่งที่สร้างใหม่:**
+
+| รายการ | ค่า |
+|--------|-----|
+| App Service | `civic-bot-app` บน ASP เดิม `ASP-civicspacegroup-9d1b` (B1 Linux, **แชร์กับ Django app `civicspace`**) |
+| Hostname | `civic-bot-app.azurewebsites.net` (สั้นลง ไม่มี random suffix) — **เปลี่ยนจากเดิม** |
+| Azure Bot | `civic-bot` (SKU F0, global) ผูก app registration เดิม |
+| Publish profile | ออกใหม่ → GitHub secret `AZURE_WEBAPP_PUBLISH_PROFILE` |
+
+> ⚠️ **ASP แชร์กับ Django app** — B1 มี 1 core / 1.75 GB memory อยู่ที่ ~70% หลังเพิ่มบอท
+> (บอทกินเพิ่มแค่ ~1%) ถ้าอนาคตเว็บโหลดหนัก ให้แยก plan ก่อนที่จะเริ่ม OOM
+
+### Hardening เพื่อความต่อเนื่อง (2026-08-18)
+
+| ตั้งค่า | ค่า | เหตุผล |
+|---------|-----|--------|
+| `alwaysOn` | `true` | **สำคัญที่สุด** — ถ้าปิด Azure จะ unload app หลัง idle 20 นาที ทำให้ข้อความแรกเจอ cold start ~24 วิ ซึ่งนานกว่า timeout ของ Bot Framework → ข้อความแรกหายเงียบทุกครั้ง (วัดจริง: cold 23.8s → warm 0.22s) |
+| `healthCheckPath` | `/` | Azure ping เอง ถ้า instance ไม่ตอบจะรีสตาร์ทให้อัตโนมัติ |
+| `httpsOnly` | `true` | endpoint เปิดสาธารณะ บังคับ TLS |
+| `http20Enabled` | `true` | ลด overhead ต่อ request |
+| Application logging | filesystem, level `Information` | ไล่ปัญหาได้ด้วย `az webapp log tail` |
+| Resource lock | `CanNotDelete` บน `civic-bot-app` และ `civic-bot` | กันโดนลบซ้ำแบบที่เกิดเมื่อ ส.ค. 2026 |
+
+> ⚠️ **Memory หลังเปิด Always On** — ขึ้นจาก ~69% เป็น ~77% (max 80%) ของ B1 1.75 GB
+> เพราะบอทค้างใน RAM ตลอดแทนที่จะถูก unload เหลือ headroom ~400 MB
+> ถ้าเห็นแตะ 90% ขึ้นไปบ่อย ให้แยก App Service Plan ออกจาก Django app
+
+**คำสั่งลบ lock ตอนที่ต้องลบ resource จริง ๆ:**
+```bash
+az lock delete --name civic-bot-app-nodelete -g civicspace_group \
+  --resource-name civic-bot-app --resource-type Microsoft.Web/sites
+```
+
+### 🔑 Client secret (rotate แล้ว 2026-08-18)
+
+App registration `civic-bot` มี secret 3 ตัว **ตัวที่ใช้งานจริงคือ `civic-bot-renewal-2026-08`**
+
+| Description | หมดอายุ | สถานะ |
+|---|---|---|
+| `civic-bot-renewal-2026-08` | **2028-08-17** | ✅ ใช้งานอยู่ (ทั้ง Azure App Settings และ `.env`) |
+| `civic-bot-gemini` (hint `Nk1`) | 2026-12-21 | สำรอง — ลบได้หลังยืนยันว่าบอทเสถียร |
+| (ไม่มีชื่อ, hint `1w5`) | 2028-06-24 | ไม่ได้ใช้ ดึงค่าคืนไม่ได้ |
+
+ยืนยันแล้วว่าขอ token จาก Entra ID (`scope=https://api.botframework.com/.default`) ผ่านจริง
+
+**วิธี rotate รอบหน้า (ก่อน ส.ค. 2028):**
+
+```bash
+# ต้องมี --append เสมอ ไม่งั้น secret เดิมถูกลบทั้งหมด บอทตายทันที
+az ad app credential reset --id 1bd2c7e9-fbeb-4f26-b554-192b70c3580e \
+  --append --years 2 --display-name "civic-bot-renewal-YYYY-MM" --query password -o tsv
+```
+
+จากนั้นเอาค่าไปใส่ทั้ง Azure App Settings และ `.env`
+
+> ⚠️ **อย่าใช้ `sed` กับค่า secret** — Entra secret มีอักขระอย่าง `|` `~` `/` `+` ปนอยู่
+> ซึ่งชนกับ delimiter ของ sed ให้ใช้ python อ่านผ่าน env var แทน (delimiter-safe)
+>
+> ```bash
+> NEW="<ค่าใหม่>" python3 -c 'import os,io
+> new=os.environ["NEW"]; p=".env"
+> ls=io.open(p,encoding="utf-8").read().splitlines(True)
+> out=[("MICROSOFT_APP_PASSWORD=\"%s\"\n"%new) if l.startswith("MICROSOFT_APP_PASSWORD=") else l for l in ls]
+> io.open(p,"w",encoding="utf-8").write("".join(out))'
+> ```
+>
+> และเวลาทดสอบ token ให้ใช้ `curl --data-urlencode "client_secret=$NEW"` ไม่ใช่ `-d` เฉย ๆ
+> เพราะอักขระพิเศษจะถูกเข้ารหัสผิดแล้วได้ผลลวง
+
 ---
 
-*Last updated: 2026-06-25 | Setup completed by: cabindev + Claude*
+### ยังค้างอยู่: Facebook Channel
+
+Azure Bot ตอนนี้ **ยังไม่มี channel เลย** ต้องทำด้วยมือใน portal เพราะต้องใช้ token จาก Meta:
+
+1. Azure Portal → Bot `civic-bot` → Channels → Facebook Messenger
+   ใส่ Facebook App ID `1007274552043694`, App Secret, Page ID `728353493701593`, Page Access Token
+2. Copy **Verify Token** ที่ Azure สร้างให้
+3. Meta for Developers → Webhooks → แก้ Callback URL เป็น
+   `https://civic-bot-app.azurewebsites.net/api/messages` (URL เดิมตายแล้ว)
+   ใส่ Verify Token จากขั้นที่ 2 → Verify and Save
+4. Subscribe fields: `messages`, `messaging_postbacks` และ subscribe เพจเข้ากับ app
+5. ทดสอบผ่าน Messenger
+
+---
+
+*Last updated: 2026-08-18 | Setup: cabindev + Claude | Rebuilt after Azure resources were deleted (see “Rebuild” section above)*
