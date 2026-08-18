@@ -61,6 +61,7 @@ Facebook Page  ──(webhook: messages, messaging_postbacks)──►  Azure Bo
 | `knowledge/*.md` | ฐานความรู้แบบแยกไฟล์ต่อประเด็น โหลดอัตโนมัติ (ไฟล์ขึ้นต้น `_` ไม่ถูกโหลด) |
 | `knowledge/_HOWTO.md` | คู่มือทีมสำหรับเพิ่ม/แก้ฐานความรู้ |
 | `BOT.md` | สเปกบอท (Single Source of Truth) — persona, กฎเหล็ก, few-shot, system prompt |
+| `tools/check-fb-token.sh` | ตรวจว่า App Secret / Page Access Token ที่ Azure ถืออยู่ยังใช้ได้ และเหลืออายุเท่าไร |
 | `requirements.txt` | Python dependencies |
 | `Procfile` | คำสั่งรันสำรอง (`python -m aiohttp.web ... app:init_func`) |
 | `.env.example` | เทมเพลต env vars (ค่าจริงอยู่ใน `.env` ซึ่ง gitignore ไว้) |
@@ -353,6 +354,50 @@ grep -h "BF-Facebook" logs/LogFiles/*docker.log | tail -20
 | `HTTP 500` + `(ServiceError) Facebook API error` | **ขาเข้าดี ขาออกพัง** — credential ที่ Azure ใช้ส่งข้อความกลับใช้ไม่ได้ | Azure Bot → Channels → Facebook |
 | `HTTP 401` | JWT ไม่ผ่าน | `MICROSOFT_APP_PASSWORD` หมดอายุ/ไม่ตรง |
 | ไม่มีแถว `BF-Facebook` เลย | Facebook ไม่ได้ส่งมา | webhook ฝั่ง Meta / App Review |
+
+### ตรวจสุขภาพ Facebook credential — `tools/check-fb-token.sh`
+
+```bash
+./tools/check-fb-token.sh
+```
+
+ดึง App Secret และ Page Access Token จาก Azure โดยตรงผ่าน ARM API
+(`listChannelWithKeys`) แล้วยิง `debug_token` ไปถาม Facebook — **ไม่ต้องเปิด
+Graph Explorer ไม่ต้อง copy อะไร ไม่พิมพ์ค่าความลับออกมา**
+
+ตอบได้ครบในครั้งเดียวว่า App Secret ยังตรงไหม token เป็น PAGE token ของเพจถูกไหม
+valid ไหม มี `pages_messaging` ไหม และ **เหลืออายุอีกเท่าไร**
+
+exit 0 = ปกติ / exit 1 = มีปัญหา (เอาไปใส่ cron เตือนล่วงหน้าได้)
+
+> **รันทุกครั้งหลังแก้ credential** — อย่าดูแค่ว่าบอทตอบได้ เพราะ token ที่เหลืออายุ
+> อีก 30 นาทีก็ยังตอบได้ในนาทีนั้น แล้วเงียบทีหลังโดยไม่มีสัญญาณ
+
+### ⏰ Page Access Token ต้องเป็น long-lived เสมอ
+
+token ที่ copy จาก Graph Explorer เป็น **short-lived (~1 ชม.)** ถ้าเอาไปใส่ Azure ตรง ๆ
+บอทจะทำงานได้ไม่กี่ชั่วโมงแล้วเงียบ ต้องแลกเป็น long-lived ก่อน
+
+แลกได้โดยไม่ต้องเปิดหน้าเว็บเลย (ใช้ค่าที่ Azure ถืออยู่แล้ว):
+
+```bash
+# 1. แลก short-lived -> long-lived
+GET https://graph.facebook.com/v21.0/oauth/access_token
+      ?grant_type=fb_exchange_token
+      &client_id=<app-id>
+      &client_secret=<app-secret>
+      &fb_exchange_token=<token-เดิม>
+
+# 2. ใส่กลับเข้า Azure (คำสั่งนี้ทำหน้าที่ upsert)
+az bot facebook create -g civicspace_group -n civic-bot \
+  --appid 1007274552043694 --page-id 728353493701593 \
+  --secret "<app-secret>" --token "<token-ใหม่>"
+
+# 3. ยืนยัน
+./tools/check-fb-token.sh    # ต้องขึ้น "ไม่มีวันหมดอายุ"
+```
+
+Page token ที่ได้จากการแลกแบบนี้จะขึ้นว่า **ไม่มีวันหมดอายุ** ซึ่งเป็นสิ่งที่ต้องการ
 
 ### เคสจริง 2026-08-18 — บอทเงียบสนิทเพราะ Facebook credential
 
