@@ -27,7 +27,7 @@ class CivicSpaceBot(ActivityHandler):
         for member in members_added:
             if member.id != turn_context.activity.recipient.id:
                 await turn_context.send_activity(
-                    "สวัสดีครับ ผมคือ CivicSpace Assistant"
+                    "สวัสดีครับ ผมคือ CivicSpace Assistant "
                     "ถามได้เลยครับ ทั้งเรื่อง CivicSpace ประเด็นแอลกอฮอล์/ปัจจัยเสี่ยง "
                     "งานพื้นที่ หรือประเด็นอื่นๆที่ท่านสนใจ ผมจะพยายามช่วยตอบให้ครับ"
                 )

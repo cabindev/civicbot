@@ -148,9 +148,15 @@ gh secret set AZURE_WEBAPP_PUBLISH_PROFILE \
 |---------|-------|
 | Facebook Page ID | 728353493701593 |
 | Facebook App ID | 1007274552043694 |
-| Verify Token | เก็บใน Azure Bot Facebook Channel settings |
-| Webhook URL | `https://civic-bot-app.azurewebsites.net/api/messages` |
+| Azure Bot resource | `civic-bot` |
+| Verify Token | Azure สร้างให้เอง ดูได้ที่ Bot `civic-bot` → Channels → Facebook |
+| Callback URL (ใส่ที่ Meta) | `https://facebook.botframework.com/api/v1/bots/civic-bot` |
+| Messaging Endpoint (Azure Bot → App Service) | `https://civic-bot-app.azurewebsites.net/api/messages` |
 | Subscribed Fields | messages, messaging_postbacks |
+
+> ⚠️ **สอง URL นี้คนละตัวกัน อย่าสลับ** — Callback URL คือทางที่ Facebook ยิงเข้า Bot Framework
+> ส่วน Messaging Endpoint คือทางที่ Bot Framework ยิงต่อเข้า App Service ของเรา
+> ใส่ Messaging Endpoint ลงช่อง Callback URL ที่ Meta = webhook ใช้ไม่ได้
 
 ---
 
@@ -290,18 +296,59 @@ az ad app credential reset --id 1bd2c7e9-fbeb-4f26-b554-192b70c3580e \
 
 ---
 
-### ยังค้างอยู่: Facebook Channel
+### ✅ Facebook Channel (เชื่อมสำเร็จ 2026-08-18)
 
-Azure Bot ตอนนี้ **ยังไม่มี channel เลย** ต้องทำด้วยมือใน portal เพราะต้องใช้ token จาก Meta:
+บอทตอบใน Messenger ของเพจ CivicSpace ได้จริงแล้ว ยืนยันด้วยการทดสอบส่งข้อความ
 
-1. Azure Portal → Bot `civic-bot` → Channels → Facebook Messenger
-   ใส่ Facebook App ID `1007274552043694`, App Secret, Page ID `728353493701593`, Page Access Token
-2. Copy **Verify Token** ที่ Azure สร้างให้
-3. Meta for Developers → Webhooks → แก้ Callback URL เป็น
-   `https://civic-bot-app.azurewebsites.net/api/messages` (URL เดิมตายแล้ว)
-   ใส่ Verify Token จากขั้นที่ 2 → Verify and Save
-4. Subscribe fields: `messages`, `messaging_postbacks` และ subscribe เพจเข้ากับ app
-5. ทดสอบผ่าน Messenger
+| ค่า | สถานะ |
+|---|---|
+| Azure `configuredChannels` | `["webchat", "directline", "facebook"]` |
+| Facebook App ID | `1007274552043694` |
+| Page ID | `728353493701593` |
+| Callback URL (ฝั่ง Meta) | `https://facebook.botframework.com/api/v1/bots/civic-bot` |
+| Subscribed fields | `messages`, `messaging_postbacks` (+ `message_deliveries`, `messaging_optins`) |
+
+**สิ่งที่เอกสารเดิมเข้าใจผิด — Azure ตั้ง webhook ฝั่ง Meta ให้อัตโนมัติ**
+
+พอกรอกฟอร์ม Facebook channel ใน Azure สำเร็จ Azure จะไปตั้ง Callback URL และ Verify Token
+ในหน้า Meta Webhooks ให้เอง **ไม่ต้อง copy ไปวางเอง** ตามที่เคยเขียนไว้
+
+ทิศทางการไหลของค่า (จุดที่สับสนบ่อยที่สุด):
+
+```
+Meta  ──► Azure   App ID, App Secret, Page ID, Page Access Token   (กรอกเอง)
+Azure ──► Meta    Callback URL, Verify Token                       (อัตโนมัติ)
+```
+
+> **Callback URL ที่ Meta ต้องใช้คือ `https://facebook.botframework.com/api/v1/bots/civic-bot`**
+> ไม่ใช่ `https://civic-bot-app.azurewebsites.net/api/messages` — อันหลังคือทางที่ Azure Bot
+> คุยกับ App Service ของเรา ไม่ใช่ทางที่ Facebook ยิงเข้ามา
+
+### ⚠️ App Review ยังไม่ผ่าน — บอทยังไม่เปิดสาธารณะ
+
+Meta app อยู่ใน **Development mode** (Messenger checklist ข้อ 3 ยังไม่ติ๊ก) ผลคือ
+
+- ✅ คนที่มี role ในแอป (Admin / Developer / Tester) ทักแล้วบอทตอบปกติ
+- ❌ **คนทั่วไปทักแล้วบอทจะเงียบ** — ไม่ใช่บั๊ก แต่ Meta บล็อกไว้
+
+ถ้าจะเปิดให้สาธารณะใช้ ต้องยื่น App Review ขอ permission `pages_messaging`
+เป็นกระบวนการฝั่ง Meta ใช้เวลาหลายวัน
+
+### วิธีไล่ปัญหาเมื่อบอทเงียบ
+
+```bash
+# 1. app ยังมีชีวิตไหม
+curl -s https://civic-bot-app.azurewebsites.net/
+
+# 2. channel ยังอยู่ไหม
+az bot show -g civicspace_group -n civic-bot --query "properties.configuredChannels"
+
+# 3. ข้อความวิ่งถึง app ไหม (ทักใน Messenger แล้วดู log สด)
+az webapp log tail -g civicspace_group -n civic-bot-app
+```
+
+อ่านผลข้อ 3 แบบนี้ — เห็น request + บอทตอบ = ปกติ / เห็น request + error = ปัญหาที่โค้ดหรือ Gemini /
+ไม่เห็น request เลย = Facebook ส่งไม่ถึง ให้ไปดู webhook กับ App Review
 
 ---
 
