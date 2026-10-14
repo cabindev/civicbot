@@ -454,7 +454,7 @@ Gemini ได้ tool `get_recent_page_posts(days)` และเรียกเ�
 > ⚠️ **ห้ามใช้ token ของ Messenger (ที่อยู่ใน Azure Bot channel)** มันมี `pages_messaging`
 > ถ้ารั่ว = ส่งข้อความในนามเพจได้ สคริปต์จะปฏิเสธ token ที่มี scope นี้ให้อัตโนมัติ
 >
-> ⚠️ **data access ของ token หมดอายุ 16 พ.ย. 2026** หลังจากนั้นบอทจะตอบว่าดึงโพสต์ไม่ได้
+> ⚠️ **data access ของ token หมดอายุ 18 พ.ย. 2026** หลังจากนั้นบอทจะตอบว่าดึงโพสต์ไม่ได้
 > (แชตปกติไม่กระทบ) ต่ออายุแล้วรัน `./tools/set-page-feed-token.sh` ใหม่
 
 ใส่/ต่ออายุ token:
