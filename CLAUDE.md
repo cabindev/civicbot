@@ -462,6 +462,12 @@ Gemini ได้ tool `get_recent_page_posts(days)` และเรียกเ�
 ./tools/set-page-feed-token.sh   # ถาม token แบบซ่อน ตรวจกับ Facebook แล้วค่อยใส่ Azure
 ```
 
+**รูปแบบคำตอบ** (ปรับ 2026-10-14 หลังทดสอบจริงแล้วยาวเกิน) — 1–2 โพสต์ โพสต์ละ 1 ประโยค
+(วันที่ + เรื่องอะไร) และ**ต้องแนบลิงก์ทุกโพสต์** ตอนสั่งให้สั้นเฉย ๆ Gemini ตัดลิงก์ทิ้ง
+จึงต้องเขียนกฎบังคับลิงก์แยกไว้ใน `SYSTEM_PROMPT` (config.py) และ `BOT.md` §6–7
+
+ยืนยันใช้งานจริงแล้ว 2026-10-14 09:56 — ทักผ่าน Messenger ได้ `Tool call` + HTTP 201 ใน ~7 วิ
+
 ดูว่าบอทเรียก tool จริงไหม: หา `Tool call: get_recent_page_posts` ใน log
 ถ้าเจอ `Graph API error fetching posts` แปลว่า token หมดอายุหรือสิทธิ์ไม่พอ
 
