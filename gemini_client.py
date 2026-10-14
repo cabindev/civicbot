@@ -6,9 +6,32 @@ from typing import List, Dict
 from google import genai
 from google.genai import types
 
+import page_feed
 from config import Config
 
 logger = logging.getLogger(__name__)
+
+# Max tool round-trips per reply, so a confused model can't loop forever.
+MAX_TOOL_ROUNDS = 3
+
+POSTS_TOOL = types.Tool(function_declarations=[
+    types.FunctionDeclaration(
+        name="get_recent_page_posts",
+        description=(
+            "ดึงโพสต์ล่าสุดจากเพจ Facebook CivicSpace (ใหม่สุดก่อน) "
+            "ใช้เมื่อผู้ใช้ถามถึงงาน กิจกรรม หรือความเคลื่อนไหวล่าสุดของเพจ"
+        ),
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "days": types.Schema(
+                    type=types.Type.INTEGER,
+                    description="ย้อนหลังกี่วัน (1-90) ค่าเริ่มต้น 14",
+                ),
+            },
+        ),
+    )
+])
 
 
 class GeminiClient:
@@ -22,6 +45,8 @@ class GeminiClient:
         self._config = types.GenerateContentConfig(
             system_instruction=Config.SYSTEM_PROMPT,
             temperature=Config.TEMPERATURE,
+            # Only offer the tool when a page token is configured.
+            tools=[POSTS_TOOL] if page_feed.is_configured() else None,
         )
 
     def _ensure_client(self):
@@ -53,11 +78,23 @@ class GeminiClient:
 
         try:
             # google-genai exposes a native async client under `.aio`.
-            response = await client.aio.models.generate_content(
-                model=Config.GEMINI_MODEL,
-                contents=contents,
-                config=self._config,
-            )
+            for _ in range(MAX_TOOL_ROUNDS + 1):
+                response = await client.aio.models.generate_content(
+                    model=Config.GEMINI_MODEL,
+                    contents=contents,
+                    config=self._config,
+                )
+                calls = response.function_calls
+                if not calls:
+                    break
+                # Keep the model's turn as-is (it carries thought signatures).
+                contents.append(response.candidates[0].content)
+                contents.append(types.Content(role="user", parts=[
+                    types.Part.from_function_response(
+                        name=call.name, response=await self._run_tool(call)
+                    )
+                    for call in calls
+                ]))
             text = (response.text or "").strip()
             if text:
                 return text
@@ -66,3 +103,11 @@ class GeminiClient:
             logger.exception("Gemini request failed")
 
         return "ขออภัยครับ ระบบขัดข้องชั่วคราว กรุณาลองใหม่อีกครั้งนะครับ"
+
+    @staticmethod
+    async def _run_tool(call) -> dict:
+        if call.name == "get_recent_page_posts":
+            days = (call.args or {}).get("days", 14)
+            logger.info("Tool call: get_recent_page_posts(days=%s)", days)
+            return await page_feed.get_recent_page_posts(days)
+        return {"error": f"unknown tool {call.name}"}

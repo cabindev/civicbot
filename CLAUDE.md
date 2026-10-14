@@ -56,7 +56,9 @@ Facebook Page  ──(webhook: messages, messaging_postbacks)──►  Azure Bo
 |------------|---------|
 | `app.py` | Entry point — aiohttp server, `CloudAdapter`, route `POST /api/messages` + health `GET /`, factory `init_func` |
 | `bot.py` | `CivicSpaceBot` — จัดการข้อความ, คำทักทาย, เก็บ conversation history (10 turn ล่าสุดต่อห้องแชต) |
-| `gemini_client.py` | Wrapper รอบ google-genai (async) — ส่ง history + system prompt + `temperature=0.3` |
+| `gemini_client.py` | Wrapper รอบ google-genai (async) — ส่ง history + system prompt + `temperature=0.3` + tool `get_recent_page_posts` |
+| `page_feed.py` | ดึงโพสต์ล่าสุดของเพจผ่าน Graph API **เฉพาะตอนผู้ใช้ถาม** (cache 10 นาที) |
+| `tools/set-page-feed-token.sh` | ตรวจ token อ่านอย่างเดียว แล้วใส่ `FACEBOOK_PAGE_TOKEN` เข้า App Settings |
 | `config.py` | โหลด env vars, `SYSTEM_PROMPT` (persona + กฎเหล็ก), `load_knowledge()` รวมไฟล์ใน `knowledge/` |
 | `knowledge/*.md` | ฐานความรู้แบบแยกไฟล์ต่อประเด็น โหลดอัตโนมัติ (ไฟล์ขึ้นต้น `_` ไม่ถูกโหลด) |
 | `knowledge/_HOWTO.md` | คู่มือทีมสำหรับเพิ่ม/แก้ฐานความรู้ |
@@ -432,6 +434,37 @@ az bot facebook show -g civicspace_group -n civic-bot --query "etag" -o tsv
 
 
 
+
+### 📰 ตอบเรื่องโพสต์ล่าสุดของเพจ (เพิ่ม 2026-10-14)
+
+บอทรู้ข้อมูลใหม่ในเพจได้แล้ว โดยไม่ต้องแก้ `knowledge/` ทุกครั้ง
+
+**ทำงานแบบถามก่อนค่อยไปหา** ไม่มี webhook ไม่มี cron
+Gemini ได้ tool `get_recent_page_posts(days)` และเรียกเองเฉพาะเมื่อผู้ใช้ถามถึงงาน/กิจกรรมล่าสุด
+คำถามทั่วไปไม่แตะ Graph API เลย ผลถูก cache 10 นาที ใช้หลักเดียวกับ skill
+`facebook-page-monitor` ของ Hermes Agent
+
+| ค่า | หมายเหตุ |
+|---|---|
+| `FACEBOOK_PAGE_TOKEN` | **token อ่านอย่างเดียว** (แอป `civicspace-insights`, ต้องมี `pages_read_user_content`) ตัวเดียวกับที่ Hermes ใช้ |
+| `FACEBOOK_PAGE_ID` | ค่าเริ่มต้น `728353493701593` |
+
+ถ้าไม่ตั้ง `FACEBOOK_PAGE_TOKEN` tool จะถูกปิด บอททำงานเหมือนเดิมทุกอย่าง
+
+> ⚠️ **ห้ามใช้ token ของ Messenger (ที่อยู่ใน Azure Bot channel)** มันมี `pages_messaging`
+> ถ้ารั่ว = ส่งข้อความในนามเพจได้ สคริปต์จะปฏิเสธ token ที่มี scope นี้ให้อัตโนมัติ
+>
+> ⚠️ **data access ของ token หมดอายุ 16 พ.ย. 2026** หลังจากนั้นบอทจะตอบว่าดึงโพสต์ไม่ได้
+> (แชตปกติไม่กระทบ) ต่ออายุแล้วรัน `./tools/set-page-feed-token.sh` ใหม่
+
+ใส่/ต่ออายุ token:
+```bash
+./tools/set-page-feed-token.sh   # ถาม token แบบซ่อน ตรวจกับ Facebook แล้วค่อยใส่ Azure
+```
+
+ดูว่าบอทเรียก tool จริงไหม: หา `Tool call: get_recent_page_posts` ใน log
+ถ้าเจอ `Graph API error fetching posts` แปลว่า token หมดอายุหรือสิทธิ์ไม่พอ
+
 ---
 
-*Last updated: 2026-08-18 | Setup: cabindev + Claude | Rebuilt after Azure resources were deleted (see “Rebuild” section above)*
+*Last updated: 2026-10-14 | Setup: cabindev + Claude | Rebuilt after Azure resources were deleted (see “Rebuild” section above)*
